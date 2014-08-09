@@ -34,7 +34,7 @@ int DecodeAsmOpInfoCallback(void *DisInfo, uint64_t PC,
                                   int TagType, void *TagBuf) {
 	struct dis_info_s *dis_info = (struct dis_info_s *) DisInfo;
 	llvm::MCInst *Inst = dis_info->Inst;
-	llvm::outs() << "DisInfo = " << DisInfo << "\n";
+//	llvm::outs() << "DisInfo = " << DisInfo << "\n";
 	int num_operands = Inst->getNumOperands();
 	if (num_operands >= 16) {
 		llvm::outs() << "num_operands >= 16\n";
@@ -42,7 +42,7 @@ int DecodeAsmOpInfoCallback(void *DisInfo, uint64_t PC,
 	}
 	dis_info->offset[num_operands] = Offset;
 	dis_info->size[num_operands] = Size;
-	llvm::outs() << format("NumOperands = 0x%x, ", num_operands) << format("Offset = 0x%x, ", Offset) << format("Size = 0x%x", Size) << "\n";
+//	llvm::outs() << format("NumOperands = 0x%x, ", num_operands) << format("Offset = 0x%x, ", Offset) << format("Size = 0x%x", Size) << "\n";
 	return 0;
 }
 
@@ -202,7 +202,7 @@ int DecodeAsmX86_64::get_reg_size_helper(int value, int *reg_index) {
 			return 0;
 		}
 	}
-	outs() << format("ERROR: get_reg_size_helper Unknown reg value = 0x%x\n", value);
+	outs() << format("ERROR: get_reg_size_helper Unknown reg value = 0x%x:%s\n", value, reg_name);
 #if 0
 	for (n = 1; n < 233; n++) {
 		outs() << format("Reg:0x%x\n", n);

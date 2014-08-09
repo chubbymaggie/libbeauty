@@ -73,12 +73,6 @@ extern void dbg_print(const char* func, int line, int module, int level, const c
 extern int reg_params_order[];
 extern int reg_params_order_size;
 
-struct extension_call_s {
-	int reg_tracker[MAX_REG];
-	int params_size;
-	int *params;
-};
-
 struct string_s {
 	char string[1024];
 	int len;

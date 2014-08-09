@@ -89,6 +89,13 @@ const char * opcode_table[] = {
 	"LEAVE",  // 0x2D
 	"NOP",  // 0x2E
 	"GEP1",  // 0x2F
+	"CALLM",  // 0x30
+	"SETCC",  // 0x31
+	"JMPM",   // 0x32
+	"MOVS",   // 0x33
+	"IMULD",  // 0x34
+	"MULD",  // 0x35
+	"TRUNC",  // 0x36
 };
 
 char *store_table[] = { "i", "r", "m", "s" };
@@ -429,6 +436,7 @@ int write_inst(struct self_s *self, struct string_s *string, struct instruction_
 		ret = 0;
 		break;
 	case CALL:
+#if 0
 		/* FIXME: This processing should not be in an output function. It should be in the EXE function. */
 		if (instruction->srcA.relocated == 2) {
 			for (n = 0; n < EXTERNAL_ENTRY_POINTS_MAX; n++) {
@@ -442,6 +450,7 @@ int write_inst(struct self_s *self, struct string_s *string, struct instruction_
 				}
 			}
 		}
+#endif
 		if ((instruction->srcA.indirect == IND_DIRECT) &&
 			(instruction->srcA.relocated == 1)) {
 			tmp = snprintf(buffer, 1023, " CALL2 0x%"PRIx64":%s(",
@@ -513,6 +522,25 @@ int write_inst(struct self_s *self, struct string_s *string, struct instruction_
 		break;
 	case RET:
 		//tmp = snprintf(buffer, 1023, "");
+		ret = 0;
+		break;
+	case TRUNC:
+		if (instruction->srcA.indirect ||
+			(instruction->dstA.indirect)) {
+			ret = 1;
+			break;
+		}
+		tmp = snprintf(buffer, 1023, " %s0x%"PRIx64"/%d,",
+			store_table[instruction->srcA.store],
+			instruction->srcA.index,
+			instruction->srcA.value_size);
+		tmp = string_cat(string, buffer, strlen(buffer));
+
+		tmp = snprintf(buffer, 1023, " %s0x%"PRIx64"/%d",
+			store_table[instruction->dstA.store],
+			instruction->dstA.index,
+			instruction->dstA.value_size);
+		tmp = string_cat(string, buffer, strlen(buffer));
 		ret = 0;
 		break;
 	default:

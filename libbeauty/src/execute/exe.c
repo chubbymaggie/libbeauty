@@ -827,7 +827,7 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 		/* Get value of srcA */
 		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcA), &(inst->value1), 0); 
 		/* Get value of srcB */
-		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcB), &(inst->value2), 0); 
+		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcB), &(inst->value2), 1); 
 		/* Create result */
 		debug_print(DEBUG_EXE, 1, "CMP\n");
 		//debug_print(DEBUG_EXE, 1, "value1 = 0x%x, value2 = 0x%x\n", inst->value1, inst->value2);
@@ -1152,37 +1152,49 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 		break;
 	case MUL:  /* Unsigned mul */
 	case IMUL: /* FIXME: Handled signed case */
+		/* If the MUL is has an immediate value, it will be in srcA, so that type info from srcB */
 		/* Get value of srcA */
 		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcA), &(inst->value1), 0); 
 		/* Get value of dstA */
 		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcB), &(inst->value2), 1); 
 		/* Create result */
-		debug_print(DEBUG_EXE, 1, "MUL\n");
+		debug_print(DEBUG_EXE, 1, "MUL or IMUL\n");
 		inst->value3.start_address = instruction->dstA.index;
 		inst->value3.length = instruction->dstA.value_size;
 		//inst->value3.length = inst->value1.length;
-		inst->value3.init_value_type = inst->value1.init_value_type;
-		inst->value3.init_value = inst->value1.init_value;
-		inst->value3.offset_value =
-			((inst->value1.offset_value + inst->value1.init_value) 
-			* (inst->value2.offset_value + inst->value2.init_value))
-			 - inst->value1.init_value;
-		inst->value3.value_type = inst->value1.value_type;
-		if (inst->instruction.dstA.indirect) {
-			inst->value3.indirect_init_value =
-				inst->value1.indirect_init_value;
-			inst->value3.indirect_offset_value =
-				inst->value1.indirect_offset_value;
-			inst->value3.value_id =
-				inst->value1.value_id;
+		/* IF srcA is a IMM, use value2 types, else use value1 types. */
+		if ((instruction->srcA.store == STORE_DIRECT) &&
+			(instruction->srcA.indirect == IND_DIRECT)) {
+			inst->value3.init_value_type = inst->value2.init_value_type;
+			inst->value3.init_value = inst->value2.init_value;
+			inst->value3.offset_value =
+				((inst->value1.offset_value + inst->value1.init_value) 
+				* (inst->value2.offset_value + inst->value2.init_value))
+				 - inst->value1.init_value;
+			inst->value3.value_type = inst->value2.value_type;
+			inst->value3.ref_memory =
+				inst->value2.ref_memory;
+			inst->value3.ref_log =
+				inst->value2.ref_log;
+			inst->value3.value_scope = inst->value2.value_scope;
+			/* Counter */
+			inst->value3.value_id = inst->value2.value_id;
+		} else {
+			inst->value3.init_value_type = inst->value1.init_value_type;
+			inst->value3.init_value = inst->value1.init_value;
+			inst->value3.offset_value =
+				((inst->value1.offset_value + inst->value1.init_value) 
+				* (inst->value2.offset_value + inst->value2.init_value))
+				 - inst->value1.init_value;
+			inst->value3.value_type = inst->value1.value_type;
+			inst->value3.ref_memory =
+				inst->value1.ref_memory;
+			inst->value3.ref_log =
+				inst->value1.ref_log;
+			inst->value3.value_scope = inst->value1.value_scope;
+			/* Counter */
+			inst->value3.value_id = inst->value1.value_id;
 		}
-		inst->value3.ref_memory =
-			inst->value1.ref_memory;
-		inst->value3.ref_log =
-			inst->value1.ref_log;
-		inst->value3.value_scope = inst->value1.value_scope;
-		/* Counter */
-		inst->value3.value_id = inst->value1.value_id;
 		/* 1 - Entry Used */
 		inst->value3.valid = 1;
 			debug_print(DEBUG_EXE, 1, "value=0x%"PRIx64"+0x%"PRIx64"=0x%"PRIx64"\n",
@@ -1800,16 +1812,18 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 		/* FIXME */
 		/* On entry:
 		 * srcA = relative offset which is value 1.
+		 * srcB = ESP.
 		 * dstA is destination EAX register which is value 2.
 		 * with associated value1 and value2 
 		 * On exit we have need:
 		 * relative value coverted to ABS value.
 		 * value1 = value1.  // Value 1 is useful for function pointer calls. 
-		 * value3 = value2
 		 * value2 = ESP
+		 * value3 = value3
 		 */
 		/* Get value of srcA */
 		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcA), &(inst->value1), 0);
+		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcB), &(inst->value2), 1);
 		value = search_store(memory_reg,
 				REG_IP,
 				4);
@@ -1819,6 +1833,20 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 		inst->value1.offset_value = inst->value1.init_value;
 		inst->value1.init_value = value->offset_value;
 
+		/* Link the call destination to a valid external_entry_point if possible */
+		if (instruction->srcA.relocated == 2) {
+			for (n = 0; n < EXTERNAL_ENTRY_POINTS_MAX; n++) {
+				struct external_entry_point_s *external_entry_points = self->external_entry_points;
+				if ((external_entry_points[n].valid != 0) &&
+					(external_entry_points[n].type == 1) &&
+					(external_entry_points[n].value == instruction->srcA.relocated_index)) {
+					//debug_print(DEBUG_OUTPUT, 1, "found external relocated 0x%x\n", n);
+					instruction->srcA.index = n;
+					instruction->srcA.relocated = 1;
+					break;
+				}
+			}
+		}
 		/* Link the call destination to a valid external_entry_point if possible */
 		if ((instruction->srcA.relocated == 0) &&
 			(instruction->srcA.indirect == IND_DIRECT)) {
@@ -1867,17 +1895,98 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 		inst->value1.valid = 1;
 		inst->value3.valid = 1;
 		put_value_RTL_instruction(self, process_state, inst);
-		/* Once value3 is written, over write value1 with ESP */
-		/* Get the current ESP value so one can convert function params to locals */
-		operand.indirect = IND_DIRECT;
-		operand.store = STORE_REG;
-		operand.index = REG_SP;
-		/* Need to find out if the reg is 32bit or 64bit. Use the REG_AX return value size */
-		operand.value_size = instruction->dstA.value_size;
-
-		ret = get_value_RTL_instruction(self, process_state, &(operand), &(inst->value1), 1); 
 		break;
 
+	case TRUNC:
+		/* Get value of srcA */
+		//ret = get_value_RTL_instruction(self, process_state, &(instruction->srcA), &(inst->value1), 0); 
+		/* Get value of dstA */
+		//ret = get_value_RTL_instruction(self, process_state, &(instruction->srcB), &(inst->value2), 0); 
+		/* Create result */
+		debug_print(DEBUG_EXE, 1, "TRUNC\n");
+		//put_value_RTL_instruction(self, process_state, inst);
+		/* Get value of srcA */
+		ret = get_value_RTL_instruction(self, process_state, &(instruction->srcA), &(inst->value1), 0); 
+		/* Create result */
+		inst->value3.start_address = instruction->dstA.index;
+		inst->value3.length = instruction->dstA.value_size;
+		//inst->value3.length = inst->value1.length;
+		/* Special case for SEX instruction. */
+		/* FIXME: Stored value in reg store should be size modified */
+		value = search_store(process_state->memory_reg,
+				instruction->dstA.index,
+				instruction->dstA.value_size);
+		if (value) {
+			/* Only update it if is is found */
+			value->length = instruction->dstA.value_size;
+		}
+		debug_print(DEBUG_EXE, 1, "TRUNC dest length = %d %d\n", inst->value1.length, inst->value3.length);
+		inst->value3.init_value_type = inst->value1.init_value_type;
+		if (64 == inst->value3.length) {
+			tmp64u = inst->value1.init_value;
+			tmp64u = tmp64u & 0xffffffffffffffff;
+		} else if (32 == inst->value3.length) {
+			tmp64u = inst->value1.init_value;
+			tmp64u = tmp64u & 0xffffffff;
+		} else {
+			debug_print(DEBUG_EXE, 1, "TRUNC length failure\n");
+			return 1;
+		}
+		inst->value3.init_value = tmp64u;
+		if (64 == inst->value3.length) {
+			tmp64u = inst->value1.offset_value;
+			tmp64u = tmp64u & 0xffffffffffffffff;
+		} else if (32 == inst->value3.length) {
+			tmp64u = inst->value1.offset_value;
+			tmp64u = tmp64u & 0xffffffff;
+		} else {
+			debug_print(DEBUG_EXE, 1, "TRUNC length failure\n");
+			return 1;
+		}
+		inst->value3.offset_value = tmp64u;
+		inst->value3.value_type = inst->value1.value_type;
+		if (inst->instruction.dstA.indirect) {
+			inst->value3.indirect_init_value =
+				inst->value1.indirect_init_value;
+			inst->value3.indirect_offset_value =
+				inst->value1.indirect_offset_value;
+			inst->value3.value_id =
+				inst->value1.value_id;
+		}
+		inst->value3.ref_memory =
+			inst->value1.ref_memory;
+		inst->value3.ref_log =
+			inst->value1.ref_log;
+		/* Note: value_scope stays from the dst, not the src. */
+		/* FIXME Maybe Exception is the MOV instruction */
+		inst->value3.value_scope = inst->value1.value_scope;
+		/* MOV param to local */
+		/* When the destination is a param_reg,
+		 * Change it to a local_reg */
+		if ((inst->value3.value_scope == 1) &&
+			(STORE_REG == instruction->dstA.store) &&
+			(1 == inst->value1.value_scope) &&
+			(0 == instruction->dstA.indirect)) {
+			inst->value3.value_scope = 2;
+		}
+		/* Counter */
+		//if (inst->value3.value_scope == 2) {
+			/* Only value_id preserves the value2 values */
+		//inst->value3.value_id = inst->value2.value_id;
+		inst->value3.value_id = 0;
+		inst->value1.value_id = 0;
+		//}
+		/* 1 - Entry Used */
+		inst->value3.valid = 1;
+			debug_print(DEBUG_EXE, 1, "value=0x%"PRIx64"+0x%"PRIx64"=0x%"PRIx64"\n",
+				inst->value3.init_value,
+				inst->value3.offset_value,
+				inst->value3.init_value +
+					inst->value3.offset_value);
+		put_value_RTL_instruction(self, process_state, inst);
+		break;
+
+		break;
 	default:
 		debug_print(DEBUG_EXE, 1, "Unhandled EXE intruction 0x%x\n", instruction->opcode);
 		ret = 1;
@@ -1885,6 +1994,7 @@ int execute_instruction(struct self_s *self, struct process_state_s *process_sta
 	}
 	switch (instruction->opcode) {
 	case NOP:
+	case CMP:
 		break;
 	default: 
 		if (inst->value3.value_scope == 0) {
