@@ -162,6 +162,16 @@ int label_to_string(struct label_s *label, char *string, int size) {
 			return 1;
 		}
 		break;
+	case 6:
+		/* Constant */
+		debug_print(DEBUG_OUTPUT, 1, "constant%04" PRIx64 ";\n", label->value);
+		tmp = snprintf(&string[offset], size - offset, "constant%04" PRIx64,
+			label->value);
+		offset += tmp;
+		if (offset >= size) {
+			return 1;
+		}
+		break;
 	default:
 		debug_print(DEBUG_OUTPUT, 1, "unknown label scope: %04"PRIx64";\n", label->scope);
 		tmp = snprintf(&string[offset], size - offset, "unknown%04"PRIx64"%04"PRIx64,
@@ -802,6 +812,8 @@ int output_inst_in_c(struct self_s *self, struct process_state_s *process_state,
 			break;
 		case MOV:
 		case SEX:
+		case ZEXT:
+		case TRUNC:
 			if (inst_log1->value1.value_type == 6) {
 				debug_print(DEBUG_OUTPUT, 1, "ERROR1 %d\n", instruction->opcode);
 				//break;

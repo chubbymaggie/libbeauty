@@ -59,6 +59,22 @@
 #include "decode_inst.h"
 #include <dis.h>
 #include <convert_ll_inst_to_rtl.h>
+#include <execinfo.h>
+
+void stack_trace()
+{
+	void *trace[16];
+	char **messages = (char **)NULL;
+	int i, trace_size = 0;
+
+	trace_size = backtrace(trace, 16);
+	messages = backtrace_symbols(trace, trace_size);
+	printf("[stack trace]>>>\n");
+	for (i=0; i < trace_size; i++)
+		printf("%s\n", messages[i]);
+	printf("<<<[stack trace]\n");
+	free(messages);
+}
 
 #define EIP_START 0x40000000
 
@@ -2103,7 +2119,7 @@ int assign_labels_to_src(struct self_s *self, int entry_point, int node)
 				} else if (instruction->srcA.relocated) {
 					label.scope = 3;
 					label.type = 2;
-					label.lab_pointer = 0;
+					label.lab_pointer = 1;
 					label.value = instruction->srcA.index;
 					label.size_bits = instruction->srcA.value_size;
 				} else {
@@ -2167,7 +2183,7 @@ int assign_labels_to_src(struct self_s *self, int entry_point, int node)
 				} else if (instruction->srcB.relocated) {
 					label.scope = 3;
 					label.type = 2;
-					label.lab_pointer = 0;
+					label.lab_pointer = 1;
 					label.value = instruction->srcB.index;
 					label.size_bits = instruction->srcB.value_size;
 				} else {
@@ -2435,7 +2451,7 @@ int assign_labels_to_src(struct self_s *self, int entry_point, int node)
 			/* FIXME: TODO*/
 			break;
 		default:
-			debug_print(DEBUG_MAIN, 1, "SSA1 failed for Inst:0x%x:0x%04x, OP 0x%x\n",
+			debug_print(DEBUG_MAIN, 1, "SSA1 failed for entry point 0x%x, Inst:0x%x:0x%04x, OP 0x%x\n",
 				entry_point, node, inst, instruction->opcode);
 			exit(1);
 			return 1;
@@ -2455,7 +2471,8 @@ int assign_labels_to_src(struct self_s *self, int entry_point, int node)
 	return 0;
 }
 
-int tip_add(struct self_s *self, int entry_point, int node, int inst, int phi, int operand, int label_index, int pointer, int integer, int bit_size)
+int tip_add(struct self_s *self, int entry_point, int node, int inst, int phi, int operand,
+	int label_index, int pointer, int pointer_size, int integer, int bit_size)
 {
 	struct external_entry_point_s *external_entry_point = &(self->external_entry_points[entry_point]);
 	struct control_flow_node_s *nodes = external_entry_point->nodes;
@@ -2483,9 +2500,10 @@ int tip_add(struct self_s *self, int entry_point, int node, int inst, int phi, i
 		label->tip[index].phi_number = phi;
 		label->tip[index].operand = operand;
 		label->tip[index].lab_pointer_first = pointer;
+		label->tip[index].lab_pointed_to_size = pointer_size;
 		label->tip[index].lab_integer_first = integer;
 		label->tip[index].lab_size_first = bit_size;
-		printf("tip_add:0x%x:0x%lx node = 0x%x, inst = 0x%x, phi = 0x%x, operand = 0x%x, lap_pointer_first = 0x%x, lab_integer_first = 0x%x, lab_size_first = 0x%x\n",
+		printf("tip_add:0x%x:0x%lx node = 0x%x, inst = 0x%x, phi = 0x%x, operand = 0x%x, pointer_first = 0x%x, pointed_to_size = 0x%x, integer_first = 0x%x, size_first = 0x%x\n",
 			label_index,
 			label_redirect[label_index].redirect,
 			label->tip[index].node,
@@ -2493,6 +2511,7 @@ int tip_add(struct self_s *self, int entry_point, int node, int inst, int phi, i
 			label->tip[index].phi_number,
 			label->tip[index].operand,
 			label->tip[index].lab_pointer_first,
+			label->tip[index].lab_pointed_to_size,
 			label->tip[index].lab_integer_first,
 			label->tip[index].lab_size_first);
 		if (label_index == 0) {
@@ -2557,10 +2576,10 @@ int build_tip_table(struct self_s *self, int entry_point, int node)
 			is_pointer2 = is_pointer_reg(&(instruction->dstA));
 			is_pointer = is_pointer1 | is_pointer2;
 			if (value_id == 3) is_pointer = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer, 0, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer, 0, 0, instruction->srcA.value_size);
 			value_id = inst_log1->value3.value_id;
 			if (value_id == 3) is_pointer = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer, 0, instruction->dstA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer, 0, 0, instruction->dstA.value_size);
 			ret = 0;
 			break;
 
@@ -2569,14 +2588,12 @@ int build_tip_table(struct self_s *self, int entry_point, int node)
 			is_pointer1 = is_pointer3 = is_pointer_reg(&(instruction->dstA));
 			is_pointer2 = 0;
 			value_id = inst_log1->value1.value_id;
-			if (value_id == 3) is_pointer1 = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer, 0, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, 1, instruction->srcA.value_size, 0, instruction->srcA.indirect_size);
 			value_id = inst_log1->value2.value_id;
-			if (value_id == 3) is_pointer2 = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, 1, 0, instruction->srcB.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, 1, 0, 0, instruction->srcB.value_size);
 			value_id = inst_log1->value3.value_id;
 			if (value_id == 3) is_pointer3 = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer, 0, instruction->dstA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer3, 0, 0, instruction->dstA.value_size);
 			ret = 0;
 			break;
 
@@ -2585,12 +2602,11 @@ int build_tip_table(struct self_s *self, int entry_point, int node)
 			is_pointer1 = is_pointer3 = is_pointer_reg(&(instruction->srcA));
 			value_id = inst_log1->value1.value_id;
 			if (value_id == 3) is_pointer1= 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer1, 0, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer1, 0, 0, instruction->srcA.value_size);
 			value_id = inst_log1->value2.value_id;
-			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, 1, 0, instruction->srcB.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, 1, 0, 0, instruction->srcB.value_size);
 			value_id = inst_log1->value3.value_id;
-			if (value_id == 3) is_pointer3 = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer3, 0, instruction->dstA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, 1, instruction->dstA.value_size, 0, instruction->dstA.indirect_size);
 			ret = 0;
 			break;
 
@@ -2614,23 +2630,23 @@ int build_tip_table(struct self_s *self, int entry_point, int node)
 			value_id = inst_log1->value1.value_id;
 			is_pointer = is_pointer_reg(&(instruction->srcA));
 			if (value_id == 3) is_pointer = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer, 0, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, is_pointer, 0, 0, instruction->srcA.value_size);
 			value_id = inst_log1->value2.value_id;
 			is_pointer = is_pointer_reg(&(instruction->srcB));
 			if (value_id == 3) is_pointer = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, is_pointer, 0, instruction->srcB.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 2, value_id, is_pointer, 0, 0, instruction->srcB.value_size);
 			value_id = inst_log1->value3.value_id;
 			is_pointer = is_pointer_reg(&(instruction->dstA));
 			if (value_id == 3) is_pointer = 1;
-			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer, 0, instruction->dstA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, is_pointer, 0, 0, instruction->dstA.value_size);
 			ret = 0;
 			break;
 
 		case RET:
 			value_id = inst_log1->value1.value_id;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, 0, 0, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, 0, 0, 0, instruction->srcA.value_size);
 			//value_id = inst_log1->value3.value_id;
-			//tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, 0, 0, instruction->dstA.value_size);
+			//tmp = tip_add(self, entry_point, node, inst, 0, 3, value_id, 0, 0, 0, instruction->dstA.value_size);
 			ret = 0;
 			break;
 
@@ -2643,7 +2659,7 @@ int build_tip_table(struct self_s *self, int entry_point, int node)
 
 		case BC:
 			value_id = inst_log1->value1.value_id;
-			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, 0, 1, instruction->srcA.value_size);
+			tmp = tip_add(self, entry_point, node, inst, 0, 1, value_id, 0, 0, 1, instruction->srcA.value_size);
 			ret = 0;
 			break;
 
@@ -2666,7 +2682,7 @@ exit1:
 	return ret;
 }
 
-int process_tip_label(struct self_s *self, int entry_point, int label_index)
+int tip_process_label(struct self_s *self, int entry_point, int label_index)
 {
 	struct external_entry_point_s *external_entry_point = &(self->external_entry_points[entry_point]);
 	struct control_flow_node_s *nodes = external_entry_point->nodes;
@@ -2684,7 +2700,10 @@ int process_tip_label(struct self_s *self, int entry_point, int label_index)
 		for (n = 0; n < label->tip_size; n++) {
 			if (label->tip[n].lab_pointer_first) {
 				label->size_bits = label->tip[n].lab_size_first;
-				label->pointer_type_size_bits = 64;
+				label->pointer_type_size_bits = label->tip[n].lab_pointed_to_size;
+				if (label->tip[n].lab_pointed_to_size != 64) {
+					label->pointer_type = 2; /* INT */
+				}
 				label->lab_pointer += label->tip[n].lab_pointer_first;
 			}
 		}
@@ -2692,7 +2711,194 @@ int process_tip_label(struct self_s *self, int entry_point, int label_index)
 	return 0;
 }
 
-int print_tip_label(struct self_s *self, int entry_point, int label_index)
+
+int dis64_copy_operand(struct self_s *self, int inst_from, int operand_from, int inst_to, int operand_to, int size)
+{
+	struct inst_log_entry_s *inst_log_entry = self->inst_log_entry;
+	struct operand_s operand;
+	struct memory_s value;
+	printf("inst_from = 0x%x, operand_from = 0x%x\n", inst_from, operand_from);
+
+	if (operand_from == 1) {
+		memcpy(&operand, &(inst_log_entry[inst_from].instruction.srcA), sizeof(struct operand_s));
+		memcpy(&value, &(inst_log_entry[inst_from].value1), sizeof(struct memory_s));
+	} else if (operand_from == 2) {
+		memcpy(&operand, &(inst_log_entry[inst_from].instruction.srcB), sizeof(struct operand_s));
+		memcpy(&value, &(inst_log_entry[inst_from].value2), sizeof(struct memory_s));
+	} else if (operand_from == 3) {
+		memcpy(&operand, &(inst_log_entry[inst_from].instruction.dstA), sizeof(struct operand_s));
+		memcpy(&value, &(inst_log_entry[inst_from].value3), sizeof(struct memory_s));
+	} else {
+		printf("dis64_copy_operand: Unknown operand_from 0x%x. Out of range\n", operand_from);
+		stack_trace();
+		abort();
+	}
+	if (operand_to == 1) {
+		memcpy(&(inst_log_entry[inst_to].instruction.srcA), &operand, sizeof(struct operand_s));
+		memcpy(&(inst_log_entry[inst_to].value1), &value, sizeof(struct memory_s));
+	} else if (operand_to == 2) {
+		memcpy(&(inst_log_entry[inst_to].instruction.srcB), &operand, sizeof(struct operand_s));
+		memcpy(&(inst_log_entry[inst_to].value2), &value, sizeof(struct memory_s));
+	} else if (operand_to == 3) {
+		memcpy(&(inst_log_entry[inst_to].instruction.dstA), &operand, sizeof(struct operand_s));
+		memcpy(&(inst_log_entry[inst_to].value3), &value, sizeof(struct memory_s));
+	} else {
+		printf("dis64_copy_operand: Unknown operand_to 0x%x. Out of range\n", operand_to);
+		stack_trace();
+		abort();
+	}
+
+	return 0;
+}
+
+int insert_nop_before(struct self_s *self, int inst, int *new_inst);
+int insert_nop_after(struct self_s *self, int inst, int *new_inst);
+
+/* This searches the tip list and discovers:
+   If a label is used with different bit widths by different instructions, add a zext
+   so that the label can be split into two, and thus not consist of multi-bit-size instructions.
+ */
+int tip_add_zext(struct self_s *self, int entry_point, int label_index)
+{
+	struct external_entry_point_s *external_entry_point = &(self->external_entry_points[entry_point]);
+	struct control_flow_node_s *nodes = external_entry_point->nodes;
+	struct inst_log_entry_s *inst_log_entry = self->inst_log_entry;
+	struct label_redirect_s *label_redirect = external_entry_point->label_redirect;
+	struct label_s *labels = external_entry_point->labels;
+	struct inst_log_entry_s *inst_log1;
+	struct instruction_s *instruction;
+	struct label_s *label;
+	struct label_s label_local;
+	int n;
+	int tmp;
+	int variable_id;
+	int variable_id_add_tip;
+	int node;
+
+	label = &labels[label_redirect[label_index].redirect];
+	if ((label->scope != 0) && (label->tip_size > 1) &&
+		(label_redirect[label_index].redirect == label_index)) {
+		int size = label->tip[0].lab_size_first;
+		int inst_new;
+		int inst_modified;
+		int operand_modified;
+		for (n = 1; n < label->tip_size; n++) {
+			if (label->tip[n].lab_size_first != size) {
+				inst_modified = label->tip[n].inst_number;
+				operand_modified = label->tip[n].operand;
+				node = label->tip[n].node;
+				if (inst_log_entry[inst_modified].instruction.opcode == RET) {
+					return 0;
+				}
+				tmp = insert_nop_before(self, inst_modified, &inst_new);
+				/* FIXME: Not support LOAD, STORE or MOV inst yet. */
+				if (inst_log_entry[inst_modified].instruction.opcode == LOAD) {
+					debug_print(DEBUG_MAIN, 1, "ZEXT/TRUNC before unhandled LOAD instruction\n");
+					exit(1);
+				}
+				if (inst_log_entry[inst_modified].instruction.opcode == STORE) {
+					debug_print(DEBUG_MAIN, 1, "ZEXT/TRUNC before unhandled STORE instruction\n");
+					exit(1);
+				}
+				if (inst_log_entry[inst_modified].instruction.opcode == MOV) {
+					debug_print(DEBUG_MAIN, 1, "ZEXT/TRUNC before unhandled MOV instruction\n");
+					/* Need to first separate the label merge that the MOV instruction did,
+					   Add the ZEXT/TRUNC.
+					   Re-implement the new label merge that rhe MOV instruction should do.
+					   NOTE: Maybe move the label merge to later?
+					 */
+					//exit(1);
+				}
+				if (label->tip[n].lab_size_first > size) {
+					inst_log_entry[inst_new].instruction.opcode = ZEXT;
+				} else {
+					inst_log_entry[inst_new].instruction.opcode = TRUNC;
+				}
+				inst_log_entry[inst_new].instruction.flags = 0;
+
+				printf("label needed zext/trunc: size=0x%x, inst_new=0x%x. tip:0x%x node = 0x%x, inst = 0x%x, phi = 0x%x, operand = 0x%x, lap_pointer_first = 0x%x, lab_integer_first = 0x%x, lab_size_first = 0x%x\n",
+				size,
+				inst_new,
+				label_index,
+				label->tip[n].node,
+				label->tip[n].inst_number,
+				label->tip[n].phi_number,
+				label->tip[n].operand,
+				label->tip[n].lab_pointer_first,
+				label->tip[n].lab_integer_first,
+				label->tip[n].lab_size_first);
+				tmp = dis64_copy_operand(self, inst_modified, operand_modified, inst_new, 1, size);
+				tmp = dis64_copy_operand(self, inst_modified, operand_modified, inst_new, 3, size);
+				inst_log_entry[inst_new].instruction.srcA.value_size = size;
+				inst_log_entry[inst_new].instruction.dstA.index = REG_TMP3;
+				inst_log_entry[inst_new].value3.value_id =
+					external_entry_point->variable_id;
+				if (operand_modified == 1) {
+					inst_log_entry[inst_modified].instruction.srcA.index = REG_TMP3;
+				} else if (operand_modified == 2) {
+					inst_log_entry[inst_modified].instruction.srcB.index = REG_TMP3;
+				} else if (operand_modified == 3) {
+					inst_log_entry[inst_modified].instruction.dstA.index = REG_TMP3;
+				} else {
+					printf("operand out of range.\n");
+					exit(1);
+				}
+				inst_log1 =  &inst_log_entry[inst_new];
+				tmp  = assign_id_label_dst(self, entry_point, inst_new, inst_log1, &label_local);
+				variable_id = external_entry_point->variable_id;
+				variable_id_add_tip = variable_id;
+				if (!tmp) {
+					debug_print(DEBUG_MAIN, 1, "variable_id = %x\n", variable_id);
+					if (variable_id >= 10000) {
+						debug_print(DEBUG_MAIN, 1, "ERROR: variable_id overrun 10000 limit. Trying to write to %d\n", variable_id);
+						exit(1);
+					}
+					label_redirect[variable_id].redirect = variable_id;
+					labels[variable_id].scope = label_local.scope;
+					labels[variable_id].type = label_local.type;
+					labels[variable_id].value = label_local.value;
+					labels[variable_id].size_bits = label_local.size_bits;
+					labels[variable_id].lab_pointer += label_local.lab_pointer;
+					variable_id++;
+					external_entry_point->variable_id = variable_id;
+					debug_print(DEBUG_MAIN, 1, "variable_id increased to = %x\n", variable_id);
+				} else {
+					debug_print(DEBUG_MAIN, 1, "ERROR: assign_id_label_dst() failed. entry_point = 0x%x, inst = 0x%x\n",
+						entry_point, inst_new);
+					exit(1);
+				}
+				if (operand_modified == 1) {
+					inst_log_entry[inst_modified].value1.value_id = variable_id_add_tip;
+				} else if (operand_modified == 2) {
+					inst_log_entry[inst_modified].value2.value_id = variable_id_add_tip;
+				} else if (operand_modified == 3) {
+					inst_log_entry[inst_modified].value3.value_id = variable_id_add_tip;
+				} else {
+					printf("operand out of range.\n");
+					exit(1);
+				}
+				/* Now update the tip table with the changes */
+				/* Update the tip to point to the new inst.
+				   Update the label on the new instruction to include a tip for the
+				   new inst, the REG_TMP3 and its label.
+				*/
+				tmp = tip_add(self, entry_point, node, inst_new, 0, 1, variable_id_add_tip,
+					label->tip[n].lab_pointer_first, 0, 0, label->tip[n].lab_size_first);
+				tmp = tip_add(self, entry_point, node, inst_modified, 0, 1, variable_id_add_tip,
+					label->tip[n].lab_pointer_first, 0, 0, label->tip[n].lab_size_first);
+				label->tip[n].inst_number = inst_new;
+				label->tip[n].operand = 1;
+				label->tip[n].lab_size_first = size;
+			}
+		}
+	}
+	return 0;
+}
+
+
+
+
+int tip_print_label(struct self_s *self, int entry_point, int label_index)
 {
 	struct external_entry_point_s *external_entry_point = &(self->external_entry_points[entry_point]);
 	struct control_flow_node_s *nodes = external_entry_point->nodes;
@@ -2708,13 +2914,14 @@ int print_tip_label(struct self_s *self, int entry_point, int label_index)
 	if ((label->scope != 0) && (label->tip_size > 0) &&
 		(label_redirect[label_index].redirect == label_index)) {
 		for (n = 0; n < label->tip_size; n++) {
-			printf("label tip:0x%x node = 0x%x, inst = 0x%x, phi = 0x%x, operand = 0x%x, lap_pointer_first = 0x%x, lab_integer_first = 0x%x, lab_size_first = 0x%x\n",
+			printf("label tip:0x%x node = 0x%x, inst = 0x%x, phi = 0x%x, operand = 0x%x, pointer_first = 0x%x, pointed_to_size = 0x%x, integer_first = 0x%x, size_first = 0x%x\n",
 			label_index,
 			label->tip[n].node,
 			label->tip[n].inst_number,
 			label->tip[n].phi_number,
 			label->tip[n].operand,
 			label->tip[n].lab_pointer_first,
+			label->tip[n].lab_pointed_to_size,
 			label->tip[n].lab_integer_first,
 			label->tip[n].lab_size_first);
 		}
@@ -2801,11 +3008,11 @@ int change_add_to_gep1(struct self_s *self, struct external_entry_point_s *exter
 	struct memory_s *memory;
 	int value_id1;
 	int value_id2;
+	int value_id3;
 
 	int inst;
 	struct label_s label;
 	int found = 0;
-	debug_print(DEBUG_MAIN, 1, "change_add_to_gep1() node 0x%x\n", node);
 
 	inst = nodes[node].inst_start;
 	do {
@@ -2813,18 +3020,27 @@ int change_add_to_gep1(struct self_s *self, struct external_entry_point_s *exter
 		instruction =  &inst_log1->instruction;
 		switch (instruction->opcode) {
 		case ADD:
+			debug_print(DEBUG_MAIN, 1, "change_add_to_gep1() node 0x%x, inst 0x%x\n", node, inst);
 			value_id1 = label_redirect[inst_log1->value1.value_id].redirect;
 			value_id2 = label_redirect[inst_log1->value2.value_id].redirect;
+			value_id3 = label_redirect[inst_log1->value3.value_id].redirect;
 			if ((labels[value_id1].lab_pointer > 0) ||
-				(labels[value_id2].lab_pointer > 0)) {
+				(labels[value_id2].lab_pointer > 0) ||
+				(labels[value_id3].lab_pointer > 0)) {
 				instruction->opcode = GEP1;
+				debug_print(DEBUG_MAIN, 1, "change_add_to_gep1() node 0x%x, inst 0x%x opcode = 0x%x\n",
+					node, inst, inst_log_entry[inst].instruction.opcode);
 			}
 			break;
 		case SUB:
+			debug_print(DEBUG_MAIN, 1, "change_sub_to_gep1() node 0x%x, inst 0x%x\n", node, inst);
 			value_id1 = label_redirect[inst_log1->value1.value_id].redirect;
 			value_id2 = label_redirect[inst_log1->value2.value_id].redirect;
-			if ((labels[value_id1].lab_pointer > 0) &&
-				(labels[value_id2].lab_pointer == 0)) {
+			value_id3 = label_redirect[inst_log1->value3.value_id].redirect;
+			/* FIXME: P1 - P2 = I, not P3. */
+			if ((labels[value_id1].lab_pointer > 0) ||
+				(labels[value_id2].lab_pointer > 0) ||
+				(labels[value_id3].lab_pointer > 0)) {
 				instruction->opcode = GEP1;
 				labels[value_id2].value = -labels[value_id2].value;
 				instruction->srcB.index = -instruction->srcB.index;
@@ -2906,9 +3122,6 @@ int discover_pointer_types(struct self_s *self, struct external_entry_point_s *e
 
 	return 0;
 }
-
-int insert_nop_before(struct self_s *self, int inst, int *new_inst);
-int insert_nop_after(struct self_s *self, int inst, int *new_inst);
 
 int substitute_inst(struct self_s *self, int inst, int new_inst)
 {
@@ -3595,7 +3808,8 @@ int insert_nop_before(struct self_s *self, int inst, int *new_inst)
 	self->flag_dependency_opcode[inst_log - 1] = 0;
 	self->flag_result_users = realloc(self->flag_result_users, (inst_log) * sizeof(int));
 	self->flag_result_users[inst_log - 1] = 0;
-	debug_print(DEBUG_MAIN, 1, "INFO: Insert nop before: Old dep size = 0x%x, new dep size = 0x%"PRIx64"\n", self->flag_dependency_size, inst_log);
+	debug_print(DEBUG_MAIN, 1, "INFO: Insert nop before inst 0x%x: Old dep size = 0x%x, new dep size = 0x%"PRIx64"\n",
+		inst, self->flag_dependency_size, inst_log);
 	debug_print(DEBUG_MAIN, 1, "INFO: Setting flag_result_users[0x%"PRIx64"] = 0\n", inst_log - 1);
 	self->flag_dependency_size = inst_log;
 
@@ -3840,6 +4054,8 @@ int assign_id_label_dst(struct self_s *self, int function, int inst, struct inst
 	case SAL:
 	case SAR:
 	case SEX:
+	case ZEXT:
+	case TRUNC:
 	case ICMP:
 	case LOAD:
 		switch (instruction->dstA.indirect) {
@@ -5198,22 +5414,7 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	/* turn "MOV reg, reg" into a NOP from the SSA perspective. Make the dst = src label */
-	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
-		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
-			for(n = 1; n < external_entry_points[l].nodes_size; n++) {
-				if (!external_entry_points[l].nodes[n].valid) {
-					/* Only output nodes that are valid */
-					continue;
-				}
-				tmp = redirect_mov_reg_reg_labels(self, &external_entry_points[l], n);
-				if (tmp) {
-					printf("redirect_mov_reg_reg() failed\n");
-					exit(1);
-				}
-			}
-		}
-	}
+
 	/* Build TIP table */
 	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
 		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
@@ -5233,8 +5434,9 @@ int main(int argc, char *argv[])
 
 	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
 		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
-			for(n = 1; n < external_entry_points[l].variable_id; n++) {
-				tmp = process_tip_label(self, l, n);
+			int previous_variable_id = external_entry_points[l].variable_id;
+			for(n = 1; n < previous_variable_id; n++) {
+				tmp = tip_add_zext(self, l, n);
 			}
 		}
 	}
@@ -5242,7 +5444,15 @@ int main(int argc, char *argv[])
 	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
 		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
 			for(n = 1; n < external_entry_points[l].variable_id; n++) {
-				tmp = print_tip_label(self, l, n);
+				tmp = tip_process_label(self, l, n);
+			}
+		}
+	}
+
+	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
+		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
+			for(n = 1; n < external_entry_points[l].variable_id; n++) {
+				tmp = tip_print_label(self, l, n);
 			}
 		}
 	}
@@ -5259,6 +5469,28 @@ int main(int argc, char *argv[])
 				tmp = change_add_to_gep1(self, &external_entry_points[l], n);
 				if (tmp) {
 					printf("change_add_to_gep1() failed\n");
+					exit(1);
+				}
+			}
+		}
+	}
+#endif
+
+	/* turn "MOV reg, reg" into a NOP from the SSA perspective. Make the dst = src label */
+	/* FIXME: Comment out mov label merge, due to zext/trunc code */
+	/* FIXME: TODO: This needs to be more careful about the merge. */
+	/*        It should check that both types are the same before merging */
+#if 1
+	for (l = 0; l < EXTERNAL_ENTRY_POINTS_MAX; l++) {
+		if (external_entry_points[l].valid && external_entry_points[l].type == 1) {
+			for(n = 1; n < external_entry_points[l].nodes_size; n++) {
+				if (!external_entry_points[l].nodes[n].valid) {
+					/* Only output nodes that are valid */
+					continue;
+				}
+				tmp = redirect_mov_reg_reg_labels(self, &external_entry_points[l], n);
+				if (tmp) {
+					printf("redirect_mov_reg_reg() failed\n");
 					exit(1);
 				}
 			}
@@ -5848,7 +6080,7 @@ int main(int argc, char *argv[])
 				for (n = 0; n < external_entry_points[l].params_size; n++) {
 					uint64_t tmp_param;
 					tmp_param = external_entry_points[l].params[n];
-					debug_print(DEBUG_MAIN, 1, "JCD5: labels 0x%x, params_size=%d\n", tmp_param, external_entry_points[l].params_size);
+					debug_print(DEBUG_MAIN, 1, "JCD5: labels 0x%lx, params_size=%d\n", tmp_param, external_entry_points[l].params_size);
 					/* Sanity check */
 					if (tmp_param >= external_entry_points[l].variable_id) {
 						debug_print(DEBUG_MAIN, 1, "Invalid entry point 0x%x, l=%d, m=%d, n=%d, params_size=%d\n",

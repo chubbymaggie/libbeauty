@@ -1731,6 +1731,13 @@ int log_to_label(int store, int indirect, uint64_t index, uint64_t size, uint64_
 			label->value = value_id;
 			label->size_bits = size;
 			break;
+		case 4: /* Constant */
+			label->scope = 6;
+			label->type = 1;
+			label->lab_pointer = 0;
+			label->value = value_id;
+			label->size_bits = size;
+			break;
 		default:
 			label->scope = 0;
 			label->type = value_scope;
@@ -1836,6 +1843,9 @@ int register_label(struct external_entry_point_s *entry_point, int inst, int ope
 	case 3:
 		debug_print(DEBUG_ANALYSE, 1, "HEX VALUE\n");
 		break;
+	case 6:
+		debug_print(DEBUG_ANALYSE, 1, "CONSTANT HEX VALUE\n");
+		break;
 	default:
 		debug_print(DEBUG_ANALYSE, 1, "VALUE unhandled 0x%"PRIx64"\n", label->scope);
 		exit(1);
@@ -1903,6 +1913,9 @@ int scan_for_labels_in_function_body(struct self_s *self, int entry_point_index)
 			switch (instruction->opcode) {
 			case MOV:
 			case SEX:
+			case ZEXT:
+			case TRUNC:
+				debug_print(DEBUG_ANALYSE, 1, "MOV, SEX, TRUNC or ZEXT\n");
 				value_id = inst_log1->value1.value_id;
 				debug_print(DEBUG_ANALYSE, 1, "value1\n");
 				tmp = register_label(entry_point, inst, 1, value_id, inst_log_entry, label_redirect, labels);

@@ -172,6 +172,7 @@ struct tip_s {
 	int phi_number; /* Number of the phi */
 	int operand; /* Which operand of the instruction? 1 = srcA/value1, 2 = srcB/value2, 3 = dstA/value3 */
 	int lab_pointer_first;  /* Is this a pointer. Determined from the LOAD or STORE command */
+	int lab_pointed_to_size; /* Is the size of the pointed to value */
 	int lab_pointer_inferred; /* This has been inferred from another label. */
 	int lab_size_first; /* Bit width of the label */
 	int lab_size_inferred;
@@ -188,7 +189,7 @@ struct label_redirect_s {
 };
 
 struct label_s {
-	/* local = 1, param = 2, data = 3, mem = 4, sp_bp = 5 */
+	/* local = 1, param = 2, data = 3, mem = 4, sp_bp = 5, constant = 6 */
 	uint64_t scope;
 	/* For local or param: reg = 1, stack = 2 */
 	/* For data: data = 1, &data = 2, value = 3 */
@@ -197,6 +198,8 @@ struct label_s {
 	uint64_t value;
 	/* size in bits */
 	uint64_t size_bits;
+	/* pointer type: Unknown = 0, Pointer-to-Pointer = 1, Pointer-to-int = 2 */
+	uint64_t pointer_type;
 	/* pointer type size in bits */
 	uint64_t pointer_type_size_bits;
 	/* is it a pointer */
@@ -345,7 +348,7 @@ struct memory_s {
 	uint32_t ref_memory;
 	/* last_accessed_from_instruction_log_at_location */
 	uint32_t ref_log;
-	/* value_scope: 0 - unknown, 1 - Param, 2 - Local, 3 - Global */
+	/* value_scope: 0 - unknown, 1 - Param, 2 - Local, 3 - Global, 4 - Constant */
 	int value_scope;
 	/* Each time a new value is assigned, this value_id increases */
 	uint64_t value_id;
